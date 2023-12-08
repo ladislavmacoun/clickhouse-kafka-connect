@@ -58,6 +58,7 @@ public class ClickHouseWriter implements DBWriter {
                 .sslEnable(csc.isSslEnabled())
                 .setTimeout(csc.getTimeout())
                 .setRetry(csc.getRetry())
+                .setServers(csc.getServers())
                 .build();
 
         if (!chc.ping()) {

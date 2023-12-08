@@ -32,11 +32,11 @@ public class ClickHouseHelperClient {
     private final String password;
     private final boolean sslEnabled;
     private final int timeout;
-    private ClickHouseNode server = null;
     private final int retry;
     private ClickHouseProxyType proxyType = null;
     private String proxyHost = null;
     private int proxyPort = -1;
+    private RoundRobinLoadBalancer<ClickHouseNode> servers = null;
 
     public ClickHouseHelperClient(ClickHouseClientBuilder builder) {
         this.hostname = builder.hostname;
@@ -50,7 +50,22 @@ public class ClickHouseHelperClient {
         this.proxyType = builder.proxyType;
         this.proxyHost = builder.proxyHost;
         this.proxyPort = builder.proxyPort;
-        this.server = create();
+        this.servers = create(builder.servers);
+    }
+
+    private RoundRobinLoadBalancer<ClickHouseNode> create(List<String> hostnames) {
+        if (hostnames == null || hostnames.isEmpty()) {
+            if (hostname == null || hostname.isEmpty()) {
+                throw new IllegalArgumentException("Both hostname and cluster option cannot be empty.");
+            }
+
+            return new RoundRobinLoadBalancer<>(List.of(createNode(hostname)));
+        }
+
+        List<ClickHouseNode> nodes = new ArrayList<>(hostnames.size());
+        hostnames.forEach(host -> nodes.add(createNode(host)));
+
+        return new RoundRobinLoadBalancer<>(nodes);
     }
 
     public Map<ClickHouseOption, Serializable> getDefaultClientOptions() {
@@ -64,25 +79,24 @@ public class ClickHouseHelperClient {
         return options;
     }
 
-    private ClickHouseNode create() {
+    private ClickHouseNode createNode(String hostname) {
         String protocol = "http";
         if (this.sslEnabled)
             protocol += "s";
 
         String url = String.format("%s://%s:%d/%s", protocol, hostname, port, database);
 
-        LOGGER.info("ClickHouse URL: " + url);
+        LOGGER.info("Adding ClickHouse URL: " + url);
 
         if (username != null && password != null) {
             LOGGER.debug(String.format("Adding username [%s]", username));
             Map<String, String> options = new HashMap<>();
             options.put("user", username);
             options.put("password", password);
-            server = ClickHouseNode.of(url, options);
-        } else {
-            server = ClickHouseNode.of(url);
+            return ClickHouseNode.of(url, options);
         }
-        return server;
+
+        return ClickHouseNode.of(url);
     }
 
     public boolean ping() {
@@ -90,11 +104,11 @@ public class ClickHouseHelperClient {
                 .options(getDefaultClientOptions())
                 .nodeSelector(ClickHouseNodeSelector.of(ClickHouseProtocol.HTTP))
                 .build();
-        LOGGER.debug(String.format("Server [%s] , Timeout [%d]", server, timeout));
+        LOGGER.debug(String.format("Server [%s] , Timeout [%d]", getServer(), timeout));
         int retryCount = 0;
 
         while (retryCount < retry) {
-            if (clientPing.ping(server, timeout)) {
+            if (clientPing.ping(getServer(), timeout)) {
                 LOGGER.info("Ping was successful.");
                 clientPing.close();
                 return true;
@@ -108,7 +122,7 @@ public class ClickHouseHelperClient {
     }
 
     public ClickHouseNode getServer() {
-        return this.server;
+        return servers.getNextItem();
     }
 
     public ClickHouseResponse query(String query) {
@@ -123,7 +137,7 @@ public class ClickHouseHelperClient {
                     .options(getDefaultClientOptions())
                     .nodeSelector(ClickHouseNodeSelector.of(ClickHouseProtocol.HTTP))
                     .build();
-                 ClickHouseResponse response = client.read(server)
+                 ClickHouseResponse response = client.read(getServer())
                          .format(clickHouseFormat)
                          .query(query)
                          .executeAndWait()) {
@@ -144,7 +158,7 @@ public class ClickHouseHelperClient {
                 .options(getDefaultClientOptions())
                 .nodeSelector(ClickHouseNodeSelector.of(ClickHouseProtocol.HTTP))
                 .build();
-             ClickHouseResponse response = client.read(server)
+             ClickHouseResponse response = client.read(getServer())
                      .query("SHOW TABLES")
                      .executeAndWait()) {
             for (ClickHouseRecord r : response.records()) {
@@ -169,7 +183,7 @@ public class ClickHouseHelperClient {
                 .options(getDefaultClientOptions())
                 .nodeSelector(ClickHouseNodeSelector.of(ClickHouseProtocol.HTTP))
                 .build();
-             ClickHouseResponse response = client.read(server)
+             ClickHouseResponse response = client.read(getServer())
                      .query(describeQuery)
                      .executeAndWait()) {
             Table table = new Table(tableName);
@@ -237,6 +251,7 @@ public class ClickHouseHelperClient {
         private ClickHouseProxyType proxyType = null;
         private String proxyHost = null;
         private int proxyPort = -1;
+        private List<String> servers;
 
         public ClickHouseClientBuilder(String hostname, int port, ClickHouseProxyType proxyType, String proxyHost, int proxyPort) {
             this.hostname = hostname;
@@ -274,6 +289,11 @@ public class ClickHouseHelperClient {
 
         public ClickHouseClientBuilder setRetry(int retry) {
             this.retry = retry;
+            return this;
+        }
+
+        public ClickHouseClientBuilder setServers(List<String> servers) {
+            this.servers = servers;
             return this;
         }
 

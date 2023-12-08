@@ -48,6 +48,7 @@ public class KeeperStateProvider implements StateProvider {
                 .sslEnable(sslEnabled)
                 .setTimeout(timeout)
                 .setRetry(csc.getRetry())
+                .setServers(csc.getServers())
                 .build();
 
         if (!chc.ping()) {

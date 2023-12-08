@@ -11,6 +11,8 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static com.clickhouse.data.ClickHouseDataType.Array;
 
@@ -19,6 +21,7 @@ public class ClickHouseSinkConfig {
 
     //Configuration Names
     public static final String HOSTNAME = "hostname";
+    public static final String CLUSTER = "cluster";
     public static final String PORT = "port";
     public static final String DATABASE = "database";
     public static final String USERNAME = "username";
@@ -62,6 +65,7 @@ public class ClickHouseSinkConfig {
     }
 
     private final String hostname;
+    private final List<String> cluster;
     private final int port;
     private final String database;
     private final String username;
@@ -146,6 +150,7 @@ public class ClickHouseSinkConfig {
     public ClickHouseSinkConfig(Map<String, String> props) {
         // Extracting configuration
         hostname = props.get(HOSTNAME);
+        cluster = Stream.of(props.get(CLUSTER).split(",")).collect(Collectors.toList());
         port = Integer.parseInt(props.getOrDefault(PORT, String.valueOf(portDefault)));
         database = props.getOrDefault(DATABASE, databaseDefault);
         username = props.getOrDefault(USERNAME, usernameDefault);
@@ -250,14 +255,22 @@ public class ClickHouseSinkConfig {
         int orderInGroup = 0;
         configDef.define(HOSTNAME,
                 ConfigDef.Type.STRING,
-                ConfigDef.NO_DEFAULT_VALUE,
-                new ConfigDef.NonEmptyString(),
+                "",
                 ConfigDef.Importance.HIGH,
                 "hostname",
                 group,
                 ++orderInGroup,
                 ConfigDef.Width.MEDIUM,
                 "ClickHouse Hostname.");
+        configDef.define(CLUSTER,
+                ConfigDef.Type.LIST,
+                "",
+                ConfigDef.Importance.HIGH,
+                "cluster",
+                group,
+                ++orderInGroup,
+                ConfigDef.Width.MEDIUM,
+                "ClickHouse cluster hostnames.");
         configDef.define(PORT,
                 ConfigDef.Type.INT,
                 portDefault,
@@ -520,5 +533,8 @@ public class ClickHouseSinkConfig {
     }
     public String getTableName() {
         return  tableName;
+    }
+    public List<String> getServers() {
+        return cluster;
     }
 }
