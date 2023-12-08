@@ -5,6 +5,7 @@ import com.clickhouse.kafka.connect.sink.data.convert.RecordConvertor;
 import com.clickhouse.kafka.connect.sink.data.convert.SchemalessRecordConvertor;
 import com.clickhouse.kafka.connect.sink.data.convert.SchemaRecordConvertor;
 import com.clickhouse.kafka.connect.sink.data.convert.StringRecordConvertor;
+import com.clickhouse.kafka.connect.sink.data.convert.ByteRecordConvertor;
 import com.clickhouse.kafka.connect.sink.kafka.OffsetContainer;
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
@@ -24,6 +25,7 @@ public class Record {
     private List<Field> fields = null;
     private SchemaType schemaType;
     private SinkRecord sinkRecord = null;
+    private byte[] payload = null;
 
     public Record(SchemaType schemaType, OffsetContainer recordOffsetContainer, List<Field> fields, Map<String, Data> jsonMap, SinkRecord sinkRecord) {
         this.recordOffsetContainer = recordOffsetContainer;
@@ -31,6 +33,13 @@ public class Record {
         this.jsonMap = jsonMap;
         this.sinkRecord = sinkRecord;
         this.schemaType = schemaType;
+    }
+
+    public Record(SchemaType schemaType, OffsetContainer recordOffsetContainer, SinkRecord sinkRecord, byte[] payload) {
+        this.schemaType = schemaType;
+        this.recordOffsetContainer = recordOffsetContainer;
+        this.sinkRecord = sinkRecord;
+        this.payload = payload;
     }
 
     public String getTopicAndPartition() {
@@ -61,11 +70,19 @@ public class Record {
         return this.schemaType;
     }
 
+    public byte[] getPayload() { return this.payload; }
+
     private static RecordConvertor schemaRecordConvertor = new SchemaRecordConvertor();
     private static RecordConvertor schemalessRecordConvertor = new SchemalessRecordConvertor();
     private static RecordConvertor emptyRecordConvertor = new EmptyRecordConvertor();
     private static RecordConvertor stringRecordConvertor = new StringRecordConvertor();
+    private static ByteRecordConvertor byteRecordConvertor = new ByteRecordConvertor();
     private static RecordConvertor getConvertor(Schema schema, Object data) {
+        if (data instanceof byte[]) {
+            // TODO: add proper factory for convertor
+            return byteRecordConvertor;
+        }
+
         if (data == null ) {
             return emptyRecordConvertor;
         }

@@ -13,18 +13,11 @@ import com.clickhouse.kafka.connect.sink.db.helper.ClickHouseHelperClient;
 import com.clickhouse.kafka.connect.sink.db.mapping.Column;
 import com.clickhouse.kafka.connect.sink.db.mapping.Table;
 import com.clickhouse.kafka.connect.sink.db.mapping.Type;
-import com.clickhouse.kafka.connect.sink.dlq.DuplicateException;
 import com.clickhouse.kafka.connect.sink.dlq.ErrorReporter;
-import com.clickhouse.kafka.connect.util.Mask;
-
 import com.clickhouse.kafka.connect.util.QueryIdentifier;
 import com.clickhouse.kafka.connect.util.Utils;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
-
-import java.math.BigDecimal;
-import java.util.concurrent.TimeUnit;
-
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
@@ -33,15 +26,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 public class ClickHouseWriter implements DBWriter {
@@ -143,6 +134,11 @@ public class ClickHouseWriter implements DBWriter {
         Table table = getTable(topic);
         if (table == null) { return; }//We checked the error flag in getTable, so we don't need to check it again here
         LOGGER.info("Trying to insert [{}] records to table name [{}] (QueryId: [{}])", records.size(), table.getName(), queryId.getQueryId());
+
+        if (first.getPayload() != null) {
+            doInsertPayload(records, table, queryId);
+            return;
+        }
 
         switch (first.getSchemaType()) {
             case SCHEMA:
@@ -599,6 +595,53 @@ public class ClickHouseWriter implements DBWriter {
                 }
             }
         }
+        s3 = System.currentTimeMillis();
+        LOGGER.info("batchSize: {} data ms: {} send ms: {} (QueryId: [{}])", records.size(), s2 - s1, s3 - s2, queryId.getQueryId());
+    }
+
+    protected void doInsertPayload(List<Record> records, Table table, QueryIdentifier queryId) throws IOException, ExecutionException, InterruptedException {
+        long s1 = System.currentTimeMillis();
+        long s2 = 0;
+        long s3 = 0;
+
+        Record first = records.get(0);
+
+        if (!validateDataSchema(table, first, false))
+            throw new RuntimeException();
+        // Let's test first record
+        // Do we have all elements from the table inside the record
+
+        s2 = System.currentTimeMillis();
+        try (ClickHouseClient client = getClient()) {
+            ClickHouseRequest.Mutation request = getMutationRequest(client, ClickHouseFormat.CapnProto, table.getName(), queryId.getQueryId(),
+                    first.getRecordOffsetContainer().getOffset() + first.getTopicAndPartition())
+                    .set("format_schema", "http_log.capnp:Message");
+            ClickHouseConfig config = request.getConfig();
+            CompletableFuture<ClickHouseResponse> future;
+
+            try (ClickHousePipedOutputStream stream = ClickHouseDataStreamFactory.getInstance()
+                    .createPipedOutputStream(config)) {
+                // start the worker thread which transfer data from the input into ClickHouse
+                future = request.data(stream.getInputStream()).execute();
+                // write bytes into the piped stream
+                for (Record record : records) {
+                    byte[] data = record.getPayload();
+                    if (data != null) {
+                        stream.writeBytes(data);
+                    } else {
+                        LOGGER.warn("Empty payload for record at {}", record.getTopicAndPartition());
+                    }
+                }
+
+                // We need to close the stream before getting a response
+                stream.close();
+                try (ClickHouseResponse response = future.get()) {
+                    ClickHouseResponseSummary summary = response.getSummary();
+                    LOGGER.info("Response Summary - Written Bytes: [{}], Written Rows: [{}] - (QueryId: [{}])", summary.getWrittenBytes(), summary.getWrittenRows(), queryId.getQueryId());
+                }
+            }
+        }
+
         s3 = System.currentTimeMillis();
         LOGGER.info("batchSize: {} data ms: {} send ms: {} (QueryId: [{}])", records.size(), s2 - s1, s3 - s2, queryId.getQueryId());
     }
