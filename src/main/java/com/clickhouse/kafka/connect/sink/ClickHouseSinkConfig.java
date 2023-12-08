@@ -39,6 +39,7 @@ public class ClickHouseSinkConfig {
     public static final String PROXY_PORT = "proxyPort";
     public static final String ZK_PATH = "zkPath";
     public static final String ZK_DATABASE = "zkDatabase";
+    public static final String TABLE_NAME = "table";
 
 
     
@@ -75,6 +76,7 @@ public class ClickHouseSinkConfig {
 
     private final Map<String, String> clickhouseSettings;
     private final Map<String, String> topicToTableMap;
+    private final String tableName;
     private final ClickHouseProxyType proxyType;
     private final String proxyHost;
     private final int proxyPort;
@@ -176,6 +178,7 @@ public class ClickHouseSinkConfig {
         //We set this so our ResponseSummary has actual data in it
         this.addClickHouseSetting("send_progress_in_http_headers", "1", false);
 
+        this.tableName = props.get(TABLE_NAME);
         topicToTableMap = new HashMap<>();
         String topicToTableMapString = props.getOrDefault(TABLE_MAPPING, "").trim();
         if (!topicToTableMapString.isBlank()) {
@@ -368,6 +371,15 @@ public class ClickHouseSinkConfig {
                 ++orderInGroup,
                 ConfigDef.Width.LONG,
                 "Table mapping.");
+        configDef.define(TABLE_NAME,
+                ConfigDef.Type.STRING,
+                ConfigDef.NO_DEFAULT_VALUE,
+                ConfigDef.Importance.LOW,
+                "A ClickHouse database table name",
+                group,
+                ++orderInGroup,
+                ConfigDef.Width.LONG,
+                "Table name.");
         configDef.define(ERRORS_TOLERANCE,
                 ConfigDef.Type.STRING,
                 "none",
@@ -505,5 +517,8 @@ public class ClickHouseSinkConfig {
     }
     public String getZkDatabase() {
         return zkDatabase;
+    }
+    public String getTableName() {
+        return  tableName;
     }
 }

@@ -48,12 +48,6 @@ public class ProxySinkTask {
         ClickHouseWriter chWriter = new ClickHouseWriter();
         this.dbWriter = chWriter;
 
-        // Add table mapping refresher
-        if (clickHouseSinkConfig.getTableRefreshInterval() > 0) {
-            TableMappingRefresher tableMappingRefresher = new TableMappingRefresher(chWriter);
-            Timer tableRefreshTimer = new Timer();
-            tableRefreshTimer.schedule(tableMappingRefresher, clickHouseSinkConfig.getTableRefreshInterval(), clickHouseSinkConfig.getTableRefreshInterval());
-        }
 
         // Add dead letter queue
         boolean isStarted = dbWriter.start(clickHouseSinkConfig);

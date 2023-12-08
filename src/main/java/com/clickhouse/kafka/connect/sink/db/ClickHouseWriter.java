@@ -42,11 +42,9 @@ public class ClickHouseWriter implements DBWriter {
     private ClickHouseHelperClient chc = null;
     private ClickHouseSinkConfig csc = null;
 
-    private Map<String, Table> mapping = null;
-    private AtomicBoolean isUpdateMappingRunning = new AtomicBoolean(false);
+    private TableProvider tableProvider = null;
 
     public ClickHouseWriter() {
-        this.mapping = new HashMap<String, Table>();
     }
 
     @Override
@@ -69,45 +67,24 @@ public class ClickHouseWriter implements DBWriter {
 
         LOGGER.debug("Ping was successful.");
 
-        this.updateMapping();
-        if (mapping.isEmpty()) {
-            LOGGER.error("Did not find any tables in destination Please create before running.");
-            return false;
+        String tableName = csc.getTableName();
+        if (tableName != null && !tableName.isEmpty()) {
+            this.tableProvider = new SimpleTableProvider(tableName);
+        } else {
+            MappingTableProvider provider = new MappingTableProvider(chc, csc);
+            // Add table mapping refresher
+            if (csc.getTableRefreshInterval() > 0) {
+                TableMappingRefresher tableMappingRefresher = new TableMappingRefresher(provider);
+                Timer tableRefreshTimer = new Timer();
+                tableRefreshTimer.schedule(tableMappingRefresher, csc.getTableRefreshInterval(), csc.getTableRefreshInterval());
+            }
+
+            this.tableProvider = provider;
         }
 
         return true;
     }
 
-    public void updateMapping() {
-        // Do not start a new update cycle if one is already in progress
-        if (this.isUpdateMappingRunning.get()) {
-            return;
-        }
-        this.isUpdateMappingRunning.set(true);
-
-        LOGGER.debug("Update table mapping.");
-
-        try {
-            // Getting tables from ClickHouse
-            List<Table> tableList = this.chc.extractTablesMapping(this.mapping);
-            if (tableList.isEmpty()) {
-                return;
-            }
-
-            HashMap<String, Table> mapping = new HashMap<String, Table>();
-
-            // Adding new tables to mapping
-            // TODO: check Kafka Connect's topics name or topics regex config and
-            // only add tables to in-memory mapping that matches the topics we consume.
-            for (Table table : tableList) {
-                mapping.put(table.getName(), table);
-            }
-
-            this.mapping = mapping;
-        } finally {
-            this.isUpdateMappingRunning.set(false);
-        }
-    }
 
     @Override
     public void stop() {
@@ -673,19 +650,7 @@ public class ClickHouseWriter implements DBWriter {
         return request;
     }
     private Table getTable(String topic) {
-        String tableName = Utils.getTableName(topic, csc.getTopicToTableMap());
-        Table table = this.mapping.get(tableName);
-        if (table == null) {
-            if (csc.getSuppressTableExistenceException()) {
-                LOGGER.warn("Table [{}] does not exist, but error was suppressed.", tableName);
-            } else {
-                //TODO to pick the correct exception here
-                LOGGER.error("Table [{}] does not exist - see docs for more details about table names and topic names.", tableName);
-                throw new RuntimeException(String.format("Table %s does not exist", tableName));
-            }
-        }
-
-        return table;//It'll only be null if we suppressed the error
+        return tableProvider.getTable(topic);
     }
 
 

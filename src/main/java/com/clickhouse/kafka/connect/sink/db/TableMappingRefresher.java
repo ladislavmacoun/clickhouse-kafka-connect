@@ -6,16 +6,16 @@ import java.util.TimerTask;
 
 public class TableMappingRefresher extends TimerTask {
   private static final Logger LOGGER = LoggerFactory.getLogger(TableMappingRefresher.class);
-  private ClickHouseWriter chWriter = null;
+  private MappingTableProvider provider;
 
-  public TableMappingRefresher(final ClickHouseWriter chWriter) {
-    this.chWriter = chWriter;
+  public TableMappingRefresher(final MappingTableProvider provider) {
+    this.provider = provider;
   }
 
   @Override
   public void run() {
     try {
-      chWriter.updateMapping();
+      provider.updateMapping();
     } catch (Exception e) {
       LOGGER.error("Update mapping Error: {}", e.getMessage());
     }
